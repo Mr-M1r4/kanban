@@ -38,6 +38,11 @@ export function LoginScreen({
       setError(res.error)
       return
     }
+    // Le invitaron y aun no es miembro: a la pagina de la invitacion.
+    if (res.data.inviteToken) {
+      router.push(`/invitar?token=${encodeURIComponent(res.data.inviteToken)}`)
+      return
+    }
     router.push(`/t?b=${encodeURIComponent(res.data.slug)}`)
     router.refresh()
   }

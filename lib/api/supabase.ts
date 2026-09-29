@@ -3,7 +3,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 import type { ActionResult, PersonDTO, Role } from "@/lib/types"
 import { colorFor, kindOf, nameFromEmail, normalizeEmail, PRIORITY_KEYS, slugify } from "@/lib/utils"
-import { DEFAULT_COLUMNS, DEFAULT_LABELS } from "@/lib/defaults"
 import { buildState } from "./state"
 import type { Api, BoardSummary, InviteResult, Row, SignInResult, Snapshot, Table } from "./types"
 import { token, uid } from "./types"
@@ -82,28 +81,29 @@ async function ensureProfile(me: string, email: string, name?: string) {
   return row
 }
 
-async function createBoardWithDefaults(me: string, name: string) {
+/**
+ * Crea el tablero con sus columnas y etiquetas.
+ *
+ * Va contra la funcion create_board_with_defaults: el RLS no permite insertar
+ * el primer miembro ni las columnas a mano, y que el slug este libre se
+ * comprueba dentro de la funcion (las politicas de lectura ocultan los
+ * tableros de otras personas, asi que desde el cliente no se podria ver).
+ */
+async function createBoardWithDefaults(name: string) {
   const clean = name.trim().slice(0, 80) || "Mi Tablero"
-  let slug = slugify(clean) || "tablero"
-  const taken = await first<{ id: string }>(table("boards").select("id").eq("slug", slug))
-  if (taken) slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`
-  const board: Row["boards"] = { id: uid(), slug, name: clean, color: colorFor(clean), created_by: me, created_at: now() }
-  await table("boards").insert(board)
-  await table("members").insert({ id: uid(), board_id: board.id, user_id: me, role: "admin", created_at: now() })
-  await table("columns").insert(
-    DEFAULT_COLUMNS.map((c, i) => ({
-      id: uid(),
-      board_id: board.id,
-      title: c.name,
-      kind: c.kind,
-      position: (i + 1) * 1024,
-      wip_limit: null,
-    })),
-  )
-  await table("labels").insert(
-    DEFAULT_LABELS.map((l) => ({ id: uid(), board_id: board.id, name: l.name, color: l.color })),
-  )
-  return board
+  const { data, error } = await sb().rpc("create_board_with_defaults", {
+    p_name: clean,
+    p_slug: slugify(clean) || "tablero",
+  })
+  if (error) throw new Error(error.message)
+  // La funcion devuelve una fila, pero segun la version llega como objeto o
+  // como lista de una: se acepta cualquiera de las dos.
+  const board = (Array.isArray(data) ? data[0] : data) as Row["boards"] | null
+  if (!board) throw new Error("No se pudo crear el tablero.")
+  // El color se elige en el cliente; la funcion pone uno por defecto.
+  const color = colorFor(clean)
+  await table("boards").update({ color }).eq("id", board.id)
+  return { ...board, color }
 }
 
 /** Board + rol de quien pregunta. Falla si no es miembro. */
@@ -163,7 +163,13 @@ export const supabaseApi: Api = {
     const profile = await ensureProfile(me.id, clean, name)
     const first_membership = await first<Row["members"]>(table("members").select("*").eq("user_id", me.id))
     if (!first_membership) {
-      const board = await createBoardWithDefaults(me.id, boardName.trim() || "Mi Tablero")
+      // Si le invitaron y todavia no entro, que vaya a la invitacion en vez de
+      // crear un tablero personal de propina.
+      const invite = await first<Row["invites"]>(
+        table("invites").select("*").eq("email", clean).is("accepted_at", null),
+      )
+      if (invite) return ok({ slug: "", name: profile.name, inviteToken: invite.token })
+      const board = await createBoardWithDefaults(boardName.trim() || "Mi Tablero")
       return ok({ slug: board.slug, name: profile.name })
     }
     const board = await first<Row["boards"]>(table("boards").select("*").eq("id", first_membership.board_id))
@@ -203,7 +209,7 @@ export const supabaseApi: Api = {
   async createBoard(name): Promise<ActionResult<SignInResult>> {
     return run(async (me) => {
       const profile = await first<Row["users"]>(table("users").select("*").eq("id", me))
-      const board = await createBoardWithDefaults(me, name)
+      const board = await createBoardWithDefaults(name)
       return ok({ slug: board.slug, name: profile?.name ?? "" })
     })
   },

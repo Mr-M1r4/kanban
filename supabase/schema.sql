@@ -12,7 +12,7 @@ create extension if not exists pgcrypto;
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.users (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   email       text not null,
   name        text not null,
   color       text not null,
@@ -20,7 +20,7 @@ create table if not exists public.users (
 );
 
 create table if not exists public.boards (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   slug        text not null unique,
   name        text not null,
   color       text not null,
@@ -29,7 +29,7 @@ create table if not exists public.boards (
 );
 
 create table if not exists public.members (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   board_id    uuid not null references public.boards (id) on delete cascade,
   user_id     uuid not null references public.users (id) on delete cascade,
   role        text not null default 'member' check (role in ('admin', 'member')),
@@ -38,7 +38,7 @@ create table if not exists public.members (
 );
 
 create table if not exists public.invites (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   board_id    uuid not null references public.boards (id) on delete cascade,
   email       text not null,
   name        text not null,
@@ -50,7 +50,7 @@ create table if not exists public.invites (
 );
 
 create table if not exists public.columns (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   board_id    uuid not null references public.boards (id) on delete cascade,
   title       text not null,
   kind        text not null default 'todo' check (kind in ('todo', 'doing', 'done')),
@@ -59,14 +59,14 @@ create table if not exists public.columns (
 );
 
 create table if not exists public.labels (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   board_id    uuid not null references public.boards (id) on delete cascade,
   name        text not null,
   color       text not null
 );
 
 create table if not exists public.cards (
-  id            uuid primary key,
+  id            uuid primary key default gen_random_uuid(),
   board_id      uuid not null references public.boards (id) on delete cascade,
   column_id     uuid not null references public.columns (id) on delete cascade,
   title         text not null,
@@ -93,7 +93,7 @@ create table if not exists public.card_assignees (
 );
 
 create table if not exists public.items (
-  id            uuid primary key,
+  id            uuid primary key default gen_random_uuid(),
   card_id       uuid not null references public.cards (id) on delete cascade,
   title         text not null,
   done          boolean not null default false,
@@ -103,7 +103,7 @@ create table if not exists public.items (
 );
 
 create table if not exists public.comments (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   card_id     uuid not null references public.cards (id) on delete cascade,
   author_id   uuid not null references public.users (id) on delete cascade,
   body        text not null,
@@ -111,7 +111,7 @@ create table if not exists public.comments (
 );
 
 create table if not exists public.activity (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
   board_id    uuid not null references public.boards (id) on delete cascade,
   actor_id    uuid references public.users (id) on delete set null,
   type        text not null,
@@ -119,6 +119,19 @@ create table if not exists public.activity (
   card_id     uuid references public.cards (id) on delete set null,
   created_at  timestamptz not null default now()
 );
+
+-- Por si el proyecto ya existia sin defaults: el cliente manda el id, pero la
+-- funcion create_board_with_defaults lo deja generar a Postgres.
+alter table public.users       alter column id set default gen_random_uuid();
+alter table public.boards      alter column id set default gen_random_uuid();
+alter table public.members     alter column id set default gen_random_uuid();
+alter table public.invites     alter column id set default gen_random_uuid();
+alter table public.columns     alter column id set default gen_random_uuid();
+alter table public.labels      alter column id set default gen_random_uuid();
+alter table public.cards       alter column id set default gen_random_uuid();
+alter table public.items       alter column id set default gen_random_uuid();
+alter table public.comments    alter column id set default gen_random_uuid();
+alter table public.activity    alter column id set default gen_random_uuid();
 
 create index if not exists members_board_idx    on public.members (board_id);
 create index if not exists invites_board_idx    on public.invites (board_id);
@@ -134,6 +147,20 @@ create index if not exists activity_board_idx    on public.activity (board_id, c
 -- ---------------------------------------------------------------------------
 -- Helpers de RLS
 -- ---------------------------------------------------------------------------
+
+/** Correo de quien esta conectado. */
+create or replace function public.my_email()
+returns text
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select lower(u.email) from public.users u where u.id = auth.uid();
+$$;
+
+revoke all on function public.my_email() from anon;
+grant execute on function public.my_email() to authenticated;
 
 create or replace function public.is_member(bid uuid)
 returns boolean
@@ -192,6 +219,63 @@ as $$
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Crear un tablero con su contenido inicial.
+--
+-- Va en una funcion SECURITY DEFINER porque el RLS no permite insertar el
+-- primer miembro ni las columnas: esas politicas exigen ser miembro de un
+-- tablero que todavia no existe. Aqui se valida a mano lo mismo que hace el
+-- RLS, y de paso el slug se comprueba sin depender de las politicas de
+-- lectura (que ocultan los tableros de otras personas).
+-- ---------------------------------------------------------------------------
+
+create or replace function public.create_board_with_defaults(p_name text, p_slug text)
+returns public.boards
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_uid    uuid := auth.uid();
+  v_name   text := left(coalesce(nullif(trim(p_name), ''), 'Mi Tablero'), 80);
+  v_slug   text := left(coalesce(nullif(trim(p_slug), ''), 'tablero'), 48);
+  v_board  public.boards;
+begin
+  if v_uid is null then
+    raise exception 'sesion requerida' using errcode = '42501';
+  end if;
+
+  if exists (select 1 from public.boards where boards.slug = v_slug) then
+    v_slug := v_slug || '-' || substr(md5(random()::text), 1, 4);
+  end if;
+
+  insert into public.boards (slug, name, color, created_by)
+  values (v_slug, v_name, '#3ec46d', v_uid)
+  returning * into v_board;
+
+  insert into public.members (id, board_id, user_id, role)
+  values (gen_random_uuid(), v_board.id, v_uid, 'admin');
+
+  insert into public.columns (id, board_id, title, kind, position, wip_limit)
+  values
+    (gen_random_uuid(), v_board.id, 'Programadas',   'todo',  1024, null),
+    (gen_random_uuid(), v_board.id, 'En ejecución', 'doing', 2048, null),
+    (gen_random_uuid(), v_board.id, 'Terminadas',    'done',  3072, null);
+
+  insert into public.labels (id, board_id, name, color)
+  values
+    (gen_random_uuid(), v_board.id, 'Diseño',     '#9b6bff'),
+    (gen_random_uuid(), v_board.id, 'Desarrollo', '#5b8cff'),
+    (gen_random_uuid(), v_board.id, 'Bug',        '#ef4444'),
+    (gen_random_uuid(), v_board.id, 'Mejora',     '#22c55e');
+
+  return v_board;
+end;
+$$;
+
+revoke all on function public.create_board_with_defaults(text, text) from anon;
+grant execute on function public.create_board_with_defaults(text, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- Row Level Security
 -- ---------------------------------------------------------------------------
 
@@ -231,7 +315,14 @@ create policy users_update on public.users for update to authenticated
 -- boards
 drop policy if exists boards_select on public.boards;
 create policy boards_select on public.boards for select to authenticated
-  using (public.is_member(id) or exists (select 1 from public.invites i where i.board_id = boards.id and i.accepted_at is null));
+  using (
+    public.is_member(id)
+    or exists (
+      select 1 from public.invites i
+      where i.board_id = boards.id and i.accepted_at is null
+        and lower(i.email) = public.my_email()
+    )
+  );
 
 drop policy if exists boards_insert on public.boards;
 create policy boards_insert on public.boards for insert to authenticated
@@ -256,7 +347,8 @@ create policy members_insert on public.members for insert to authenticated
     public.is_admin(board_id)
     or (user_id = auth.uid() and exists (
       select 1 from public.invites i
-      where i.board_id = members.board_id and i.email = (select u.email from public.users u where u.id = auth.uid())
+      where i.board_id = members.board_id and i.accepted_at is null
+        and lower(i.email) = public.my_email()
     ))
   );
 
@@ -268,19 +360,23 @@ drop policy if exists members_delete on public.members;
 create policy members_delete on public.members for delete to authenticated
   using (public.is_admin(board_id) or user_id = auth.uid());
 
--- invites: cualquiera autenticado puede leer una invitación sin usar (va por token)
+-- invites: un admin ve las de su tablero; el invitado ve solo la suya, que es
+-- la unica pendiente que puede leer (la busca por token o por su correo).
 drop policy if exists invites_select on public.invites;
 create policy invites_select on public.invites for select to authenticated
-  using (public.is_member(board_id) or accepted_at is null);
+  using (
+    public.is_member(board_id)
+    or (accepted_at is null and lower(email) = public.my_email())
+  );
 
 drop policy if exists invites_insert on public.invites;
 create policy invites_insert on public.invites for insert to authenticated
-  with check (public.is_admin(board_id));
+  with check (public.is_admin(board_id) and lower(email) <> public.my_email());
 
 drop policy if exists invites_update on public.invites;
 create policy invites_update on public.invites for update to authenticated
-  using (public.is_admin(board_id) or accepted_at is null)
-  with check (public.is_admin(board_id) or accepted_at is not null);
+  using (public.is_admin(board_id) or (accepted_at is null and lower(email) = public.my_email()))
+  with check (accepted_at is not null or public.is_admin(board_id));
 
 drop policy if exists invites_delete on public.invites;
 create policy invites_delete on public.invites for delete to authenticated

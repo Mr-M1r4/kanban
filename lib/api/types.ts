@@ -121,7 +121,8 @@ export type BoardSummary = {
 
 export type InviteResult = { inviteUrl: string; name: string; token: string }
 
-export type SignInResult = { slug: string; name: string }
+export type SignInResult = { slug: string; name: string; /** Hay una invitación pendiente para este correo. */
+  inviteToken?: string }
 
 export type InviteInfo = {
   name: string

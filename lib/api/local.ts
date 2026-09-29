@@ -227,6 +227,10 @@ export const localApi: Api = {
       setSession(user.id)
       const first = db.members.find((m) => m.user_id === user.id)
       if (!first) {
+        // Si le invitaron y todavia no entro, que vaya a la invitacion en vez
+        // de crear un tablero personal de propina.
+        const invite = db.invites.find((i) => i.email === clean && !i.accepted_at)
+        if (invite) return ok({ slug: "", name: user.name, inviteToken: invite.token })
         const board = createBoardWithDefaults(db, boardName.trim() || "Mi Tablero", user.id)
         return ok({ slug: board.slug, name: user.name })
       }
