@@ -76,13 +76,17 @@ export function priorityOf(key: string) {
   return PRIORITIES[(key as PriorityKey) in PRIORITIES ? (key as PriorityKey) : "normal"]
 }
 
-/** Prefijo de despliegue ("/kanban" en GitHub Pages, "" en local). */
-export const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
-
-export const homePath = () => `${basePath}/`
-export const boardPath = (slug: string) => `${basePath}/t/?b=${encodeURIComponent(slug)}`
-export const invitePath = (token: string) => `${basePath}/invitar/?token=${encodeURIComponent(token)}`
-export const loginPath = () => `${basePath}/entrar/`
+/**
+ * Rutas internas de la app. Sin el prefijo de despliegue a proposito: next/link
+ * y router.push ya lo anaden solos, y anadirlo aqui salia duplicado
+ * (/kanban/kanban/t/...). Para un enlace que se copia y se manda a otra
+ * persona si hace falta el prefijo a mano, como hace inviteUrl() en los
+ * backends.
+ */
+export const homePath = () => "/"
+export const boardPath = (slug: string) => `/t/?b=${encodeURIComponent(slug)}`
+export const invitePath = (token: string) => `/invitar/?token=${encodeURIComponent(token)}`
+export const loginPath = () => "/entrar/"
 
 export function kindOf(key: string): ColumnKind {
   return (COLUMN_KIND_KEYS as string[]).includes(key) ? (key as ColumnKind) : "todo"
