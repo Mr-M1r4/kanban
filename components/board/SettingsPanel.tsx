@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react"
 import type { BoardState } from "@/lib/types"
-import { deleteLabelAction, createLabelAction } from "@/app/actions/board"
-import { renameBoardAction } from "@/app/actions/board"
 import { Modal, ModalHeader, callAction, toast } from "@/components/ui"
 import { IconSettings, IconTrash, IconX } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { getApi } from "@/lib/api"
 
 const PALETTE = ["#5b8cff", "#22c55e", "#f97316", "#ef4444", "#9b6bff", "#ec4899", "#14b8a6", "#64748b"]
 
@@ -19,6 +18,7 @@ export function SettingsPanel({
   onChanged: () => void
   onClose: () => void
 }) {
+  const api = getApi()
   const [name, setName] = useState(board.name)
   const [label, setLabel] = useState("")
   const [color, setColor] = useState(PALETTE[0])
@@ -43,7 +43,7 @@ export function SettingsPanel({
             <button
               className="btn-primary shrink-0"
               onClick={async () => {
-                const res = await callAction(renameBoardAction(board.slug, name), "Nombre actualizado")
+                const res = await callAction(api.renameBoard(board.slug, name), "Nombre actualizado")
                 if (res) onChanged()
               }}
             >
@@ -64,7 +64,7 @@ export function SettingsPanel({
                   aria-label={`Borrar ${l.name}`}
                   onClick={async () => {
                     if (!window.confirm(`¿Borrar la etiqueta "${l.name}"? Se quitará de todas las tareas.`)) return
-                    const res = await callAction(deleteLabelAction(board.slug, l.id), "Etiqueta borrada")
+                    const res = await callAction(api.deleteLabel(board.slug, l.id), "Etiqueta borrada")
                     if (res) onChanged()
                   }}
                 >
@@ -101,7 +101,7 @@ export function SettingsPanel({
                 className="btn-primary ml-auto px-3 py-1.5 text-xs"
                 onClick={async () => {
                   if (!label.trim()) return
-                  const res = await callAction(createLabelAction(board.slug, label, color), "Etiqueta creada")
+                  const res = await callAction(api.createLabel(board.slug, label, color), "Etiqueta creada")
                   if (res) {
                     setLabel("")
                     onChanged()

@@ -29,6 +29,7 @@ export const CardView = memo(function CardView({ card, meId, onOpen }: Props) {
   return (
     <div
       ref={setNodeRef}
+      data-card-id={card.id}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,

@@ -1,37 +1,56 @@
-import { redirect } from "next/navigation"
-import { getCurrentUser } from "@/lib/auth"
-import { prisma } from "@/lib/db"
+"use client"
+
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { BoardsHome } from "@/components/BoardsHome"
+import { Spinner } from "@/components/ui"
+import { getApi } from "@/lib/api"
+import type { BoardSummary } from "@/lib/api/types"
+import type { PersonDTO } from "@/lib/types"
 
-export const dynamic = "force-dynamic"
+export default function HomePage() {
+  const api = getApi()
+  const router = useRouter()
+  const [me, setMe] = useState<PersonDTO | null>(null)
+  const [boards, setBoards] = useState<BoardSummary[]>([])
+  const [ready, setReady] = useState(false)
 
-export default async function HomePage() {
-  const user = await getCurrentUser()
-  if (!user) redirect("/entrar")
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      const session = await api.getSession()
+      if (!alive) return
+      if (!session) {
+        router.replace("/entrar")
+        return
+      }
+      setMe(session)
+      setBoards(await api.listBoards())
+      setReady(true)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [api, router])
 
-  const boards = await prisma.boardMember.findMany({
-    where: { userId: user.id },
-    orderBy: { board: { createdAt: "desc" } },
-    include: {
-      board: {
-        include: {
-          _count: { select: { cards: true } },
-          members: { select: { id: true } },
-        },
-      },
-    },
-  })
+  if (!ready || !me) {
+    return (
+      <main className="flex min-h-screen items-center justify-center text-board-muted">
+        <Spinner />
+      </main>
+    )
+  }
 
   return (
     <BoardsHome
-      me={{ name: user.name, email: user.email, color: user.color }}
-      boards={boards.map((m) => ({
-        slug: m.board.slug,
-        name: m.board.name,
-        role: m.role === "admin" ? ("admin" as const) : ("member" as const),
-        cards: m.board._count.cards,
-        people: m.board.members.length,
-        pending: !m.joinedAt,
+      me={me}
+      boards={boards.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        role: b.role,
+        cards: b.cardCount,
+        people: b.memberCount,
+        pending: false,
       }))}
     />
   )

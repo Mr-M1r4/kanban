@@ -11,6 +11,7 @@ import { IconDots, IconPlus, IconTrash, IconX } from "@/components/icons"
 
 type Props = {
   column: ColumnDTO
+  index: number
   meId: string
   isAdmin: boolean
   onOpenCard: (id: string) => void
@@ -23,6 +24,7 @@ type Props = {
 
 export function ColumnView({
   column,
+  index,
   meId,
   isAdmin,
   onOpenCard,
@@ -80,6 +82,7 @@ export function ColumnView({
   return (
     <div
       ref={setNodeRef}
+      data-col-index={index}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
         "flex h-full w-[300px] shrink-0 flex-col rounded-2xl border border-board-line bg-board-panel/70",
@@ -108,6 +111,7 @@ export function ColumnView({
           />
         ) : (
           <button
+            data-col-title
             className="min-w-0 flex-1 truncate text-left text-sm font-semibold"
             onDoubleClick={() => isAdmin && setRenaming(true)}
             onClick={() => isAdmin && setRenaming(true)}
@@ -202,7 +206,7 @@ export function ColumnView({
       </div>
 
       <SortableContext items={column.cards.map((c) => `card:${c.id}`)} strategy={verticalListSortingStrategy}>
-        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-1">
+        <div data-dropzone className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-1">
           {column.cards.map((card) => (
             <CardView key={card.id} card={card} meId={meId} onOpen={onOpenCard} />
           ))}
@@ -223,6 +227,7 @@ export function ColumnView({
           <div className="rounded-xl border border-board-line bg-board-panel2 p-2 shadow-card">
             <textarea
               ref={textareaRef}
+              data-card-draft
               rows={2}
               className="w-full resize-none bg-transparent text-sm text-board-text placeholder:text-board-muted/70 focus:outline-none"
               placeholder="¿Qué hay que hacer? Enter para crear, Esc para cancelar."
@@ -257,6 +262,7 @@ export function ColumnView({
           </div>
         ) : (
           <button
+            data-add-card
             className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm text-board-muted transition hover:bg-white/5 hover:text-board-text"
             onClick={() => setComposing(true)}
           >

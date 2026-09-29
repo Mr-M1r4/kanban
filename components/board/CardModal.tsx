@@ -2,21 +2,9 @@
 
 import { useEffect, useState } from "react"
 import type { BoardState, CardDTO, ItemDTO } from "@/lib/types"
-import {
-  addCommentAction,
-  addItemAction,
-  deleteCardAction,
-  deleteCommentAction,
-  deleteItemAction,
-  duplicateCardAction,
-  moveCardAction,
-  setAssigneeAction,
-  setCardLabelAction,
-  updateCardAction,
-  updateItemAction,
-} from "@/app/actions/card"
 import { Modal, ModalHeader, Avatar, callAction } from "@/components/ui"
 import { cn, endOfToday, formatDue, kindOf, PRIORITIES, PRIORITY_KEYS, toInputDateTime } from "@/lib/utils"
+import { getApi } from "@/lib/api"
 import {
   IconCalendar,
   IconCheck,
@@ -37,6 +25,7 @@ type Props = {
 }
 
 export function CardModal({ card, board, onClose, onChanged }: Props) {
+  const api = getApi()
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description)
   const [itemDraft, setItemDraft] = useState("")
@@ -53,9 +42,9 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
     setDescription(card.description)
   }, [card.id, card.title, card.description])
 
-  const save = async (patch: Parameters<typeof updateCardAction>[2]) => {
+  const save = async (patch: { title?: string; description?: string; priority?: string; dueAt?: string | null }) => {
     setBusy(true)
-    await callAction(updateCardAction(board.slug, card.id, patch))
+    await callAction(api.updateCard(board.slug, card.id, patch))
     setBusy(false)
     onChanged()
   }
@@ -65,7 +54,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
     if (!clean) return
     setItemDraft("")
     setBusy(true)
-    await callAction(addItemAction(board.slug, card.id, clean))
+    await callAction(api.addItem(board.slug, card.id, clean))
     setBusy(false)
     onChanged()
   }
@@ -75,14 +64,14 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
     if (!clean) return
     setCommentDraft("")
     setBusy(true)
-    await callAction(addCommentAction(board.slug, card.id, clean))
+    await callAction(api.addComment(board.slug, card.id, clean))
     setBusy(false)
     onChanged()
   }
 
   const toggleItem = async (item: ItemDTO) => {
     setBusy(true)
-    await callAction(updateItemAction(board.slug, card.id, item.id, { done: !item.done }))
+    await callAction(api.updateItem(board.slug, card.id, item.id, { done: !item.done }))
     setBusy(false)
     onChanged()
   }
@@ -115,7 +104,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
             const target = e.target.value
             const count = board.columns.find((c) => c.id === target)?.cards.length ?? 0
             setBusy(true)
-            await callAction(moveCardAction(board.slug, card.id, target, (count + 1) * 1024), "Tarea movida")
+            await callAction(api.moveCard(board.slug, card.id, target, (count + 1) * 1024), "Tarea movida")
             setBusy(false)
             onChanged()
           }}
@@ -155,10 +144,13 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                   key={m.userId}
                   onClick={async () => {
                     setBusy(true)
-                    await callAction(setAssigneeAction(board.slug, card.id, m.userId, on), on ? undefined : `Asignada a ${m.name}`)
+                    await callAction(api.setAssignee(board.slug, card.id, m.userId, on), on ? undefined : `Asignada a ${m.name}`)
                     setBusy(false)
                     onChanged()
                   }}
+                  data-modal-assignee={m.userId}
+                  data-on={on ? "true" : "false"}
+                  data-assignee-me={m.userId === board.me.userId ? "true" : undefined}
                   title={`${m.name}${on ? " · quitar" : " · asignar"}`}
                   className={cn(
                     "rounded-full transition",
@@ -182,6 +174,8 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                 return (
                   <button
                     key={key}
+                    data-priority={key}
+                    data-on={on ? "true" : "false"}
                     onClick={() => save({ priority: key })}
                     className={cn(
                       "flex-1 rounded-lg border px-1.5 py-1.5 text-[11px] font-medium transition",
@@ -246,6 +240,8 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
               return (
                 <button
                   key={l.id}
+                  data-label={l.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")}
+                  data-on={on ? "true" : "false"}
                   className={cn(
                     "rounded-md border px-2 py-1 text-xs font-medium transition",
                     on ? "border-transparent" : "border-board-line text-board-muted hover:bg-white/5",
@@ -257,7 +253,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                   }
                   onClick={async () => {
                     setBusy(true)
-                    await callAction(setCardLabelAction(board.slug, card.id, l.id, !on))
+                    await callAction(api.setCardLabel(board.slug, card.id, l.id, !on))
                     setBusy(false)
                     onChanged()
                   }}
@@ -293,8 +289,14 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
 
           <ul className="space-y-1">
             {card.items.map((item) => (
-              <li key={item.id} className="group flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-white/[0.03]">
+              <li
+                key={item.id}
+                data-item-id={item.id}
+                data-done={item.done ? "true" : "false"}
+                className="group flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-white/[0.03]"
+              >
                 <button
+                  data-toggle-item
                   onClick={() => toggleItem(item)}
                   disabled={busy}
                   className={cn(
@@ -311,7 +313,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                   onBlur={(e) => {
                     const clean = e.target.value.trim()
                     if (clean && clean !== item.text) {
-                      void callAction(updateItemAction(board.slug, card.id, item.id, { text: clean }))
+                      void callAction(api.updateItem(board.slug, card.id, item.id, { text: clean }))
                       onChanged()
                     }
                   }}
@@ -327,7 +329,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                   className="rounded-md bg-transparent text-[11px] text-board-muted opacity-0 focus:opacity-100 group-hover:opacity-100"
                   value={item.assignee?.userId ?? ""}
                   onChange={(e) => {
-                    void callAction(updateItemAction(board.slug, card.id, item.id, { assigneeId: e.target.value || null }))
+                    void callAction(api.updateItem(board.slug, card.id, item.id, { assigneeId: e.target.value || null }))
                     onChanged()
                   }}
                 >
@@ -340,7 +342,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                 </select>
                 <button
                   onClick={async () => {
-                    await callAction(deleteItemAction(board.slug, card.id, item.id))
+                    await callAction(api.deleteItem(board.slug, card.id, item.id))
                     onChanged()
                   }}
                   className="text-board-muted opacity-0 transition hover:text-red-300 group-hover:opacity-100"
@@ -354,6 +356,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
 
           <div className="mt-1.5 flex gap-1.5">
             <input
+              data-item-input
               className="input py-1.5 text-sm"
               placeholder="Añadir paso (Enter para guardar)"
               value={itemDraft}
@@ -378,7 +381,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
 
           <ul className="space-y-2.5">
             {card.comments.map((c) => (
-              <li key={c.id} className="flex gap-2">
+              <li key={c.id} data-comment-id={c.id} className="flex gap-2">
                 <Avatar person={c.author} size={26} />
                 <div className="min-w-0 flex-1 rounded-lg bg-white/[0.04] px-3 py-2">
                   <p className="flex items-baseline gap-2">
@@ -394,7 +397,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                     {(c.author.userId === board.me.userId || board.me.role === "admin") && (
                       <button
                         onClick={async () => {
-                          await callAction(deleteCommentAction(board.slug, card.id, c.id))
+                          await callAction(api.deleteComment(board.slug, card.id, c.id))
                           onChanged()
                         }}
                         className="ml-auto text-board-muted transition hover:text-red-300"
@@ -417,6 +420,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
             <Avatar person={board.me} size={30} />
             <div className="flex-1">
               <textarea
+                data-comment-input
                 className="input min-h-[64px] resize-y text-sm"
                 placeholder="Escribe un comentario…"
                 value={commentDraft}
@@ -429,7 +433,12 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
                 }}
               />
               <div className="mt-1.5 flex items-center gap-2">
-                <button className="btn-primary px-3 py-1.5 text-xs" onClick={post} disabled={!commentDraft.trim()}>
+                <button
+                  data-send-comment
+                  className="btn-primary px-3 py-1.5 text-xs"
+                  onClick={post}
+                  disabled={!commentDraft.trim()}
+                >
                   Comentar
                 </button>
                 <span className="text-[10px] text-board-muted">Ctrl+Enter para enviar</span>
@@ -448,7 +457,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
             <button
               className="btn-outline px-2 py-1 text-xs"
               onClick={async () => {
-                const ok = await callAction(duplicateCardAction(board.slug, card.id), "Tarea duplicada")
+                const ok = await callAction(api.duplicateCard(board.slug, card.id), "Tarea duplicada")
                 if (ok) onChanged()
               }}
             >
@@ -458,7 +467,7 @@ export function CardModal({ card, board, onClose, onChanged }: Props) {
               className="btn-danger px-2 py-1 text-xs"
               onClick={async () => {
                 if (!window.confirm(`¿Borrar "${card.title}"?`)) return
-                const ok = await callAction(deleteCardAction(board.slug, card.id), "Tarea borrada")
+                const ok = await callAction(api.deleteCard(board.slug, card.id), "Tarea borrada")
                 if (ok) {
                   onChanged()
                   onClose()

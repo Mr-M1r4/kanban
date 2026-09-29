@@ -99,6 +99,6 @@ export type BoardState = {
   activity: ActivityDTO[]
 }
 
-export type ActionResult<T = undefined> =
-  | ({ ok: true } & (T extends undefined ? { data?: undefined } : { data: T }))
-  | { ok: false; error: string }
+type OkOf<T> = [T] extends [undefined] ? { ok: true; data?: undefined } : { ok: true; data: T }
+
+export type ActionResult<T = undefined> = OkOf<T> | { ok: false; error: string }

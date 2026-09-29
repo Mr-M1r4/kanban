@@ -131,3 +131,8 @@ export function toInputDateTime(date: Date | string | null) {
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+export function nameFromEmail(email: string) {
+  const local = (email.split("@")[0] || "Invitado").replace(/[._-]+/g, " ")
+  return local.replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 60) || "Invitado"
+}

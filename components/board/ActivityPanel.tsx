@@ -74,7 +74,7 @@ export function ActivityPanel({ board, onClose }: { board: BoardState; onClose: 
           ) : (
             <ul className="space-y-3">
               {board.activity.map((a) => (
-                <li key={a.id} className="flex gap-2.5">
+            <li key={a.id} data-activity-item className="flex gap-2.5">
                   {a.actor ? (
                     <Avatar person={a.actor} size={26} />
                   ) : (

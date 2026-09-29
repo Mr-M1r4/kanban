@@ -1,5 +1,7 @@
 "use client"
 
+import { useRouter } from "next/navigation"
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
@@ -23,15 +25,7 @@ import {
 } from "@dnd-kit/sortable"
 import type { BoardState, CardDTO, ColumnDTO } from "@/lib/types"
 import { cn, kindOf, PRIORITIES } from "@/lib/utils"
-import {
-  createColumnAction,
-  deleteColumnAction,
-  getBoardStateAction,
-  moveColumnAction,
-  renameBoardAction,
-  updateColumnAction,
-} from "@/app/actions/board"
-import { createCardAction, moveCardAction } from "@/app/actions/card"
+import { getApi } from "@/lib/api"
 import { ColumnView } from "@/components/board/ColumnView"
 import { CardModal } from "@/components/board/CardModal"
 import { MembersPanel } from "@/components/board/MembersPanel"
@@ -50,7 +44,6 @@ import {
   IconUsers,
   IconX,
 } from "@/components/icons"
-import { logoutAction } from "@/app/actions/auth"
 
 const GAP = 1024
 
@@ -92,6 +85,8 @@ function moveCardLocal(columns: ColumnDTO[], cardId: string, toColumnId: string,
 }
 
 export function BoardView({ initial }: { initial: BoardState }) {
+  const api = getApi()
+  const router = useRouter()
   const [board, setBoard] = useState(initial)
   const [drag, setDrag] = useState<{
     columns: ColumnDTO[]
@@ -117,9 +112,9 @@ export function BoardView({ initial }: { initial: BoardState }) {
   )
 
   const refresh = useCallback(async () => {
-    const next = await getBoardStateAction(initial.slug)
+    const next = await api.getBoardState(initial.slug)
     if (next) setBoard(next)
-  }, [initial.slug])
+  }, [api, initial.slug])
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -267,7 +262,7 @@ export function BoardView({ initial }: { initial: BoardState }) {
         : undefined
       const position = positionBetween(before, after)
       if (state.origin.columnId === target.id && Math.abs(state.origin.position - position) < 0.5) return
-      const res = await callAction(moveCardAction(board.slug, cardId, target.id, position))
+      const res = await callAction(api.moveCard(board.slug, cardId, target.id, position))
       if (!res) {
         await refresh()
         return
@@ -285,13 +280,13 @@ export function BoardView({ initial }: { initial: BoardState }) {
       const real = board.columns.filter((c) => c.id !== colId)
       const before = index > 0 ? real.find((c) => c.id === ids[index - 1])?.position : undefined
       const after = index < ids.length - 1 ? real.find((c) => c.id === ids[index + 1])?.position : undefined
-      const res = await callAction(moveColumnAction(board.slug, colId, positionBetween(before, after)))
+      const res = await callAction(api.moveColumn(board.slug, colId, positionBetween(before, after)))
       if (res) refresh()
     }
   }
 
   const createCard = async (columnId: string, title: string) => {
-    const res = await callAction(createCardAction(board.slug, columnId, title), "Tarea creada")
+    const res = await callAction(api.createCard(board.slug, columnId, title), "Tarea creada")
     if (res) refresh()
   }
 
@@ -300,7 +295,7 @@ export function BoardView({ initial }: { initial: BoardState }) {
     if (!clean) return
     setColumnName("")
     setAddingColumn(false)
-    const res = await callAction(createColumnAction(board.slug, clean, "todo"), "Columna creada")
+    const res = await callAction(api.createColumn(board.slug, clean, "todo"), "Columna creada")
     if (res) refresh()
   }
 
@@ -322,7 +317,7 @@ export function BoardView({ initial }: { initial: BoardState }) {
             onBlur={async () => {
               setRenaming(false)
               if (boardName.trim() && boardName.trim() !== board.name) {
-                const res = await callAction(renameBoardAction(board.slug, boardName))
+                const res = await callAction(api.renameBoard(board.slug, boardName))
                 if (res) refresh()
               }
             }}
@@ -358,6 +353,7 @@ export function BoardView({ initial }: { initial: BoardState }) {
             <input
               ref={searchRef}
               className="input h-9 w-28 py-1.5 pl-8 text-sm sm:w-52"
+              data-search
               placeholder="Buscar…  ( / )"
               value={filters.q}
               onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
@@ -399,14 +395,14 @@ export function BoardView({ initial }: { initial: BoardState }) {
             )}
           </div>
 
-          <button onClick={() => setPanel("people")} className="btn-ghost px-2.5" title="Personas">
+          <button data-open-members onClick={() => setPanel("people")} className="btn-ghost px-2.5" title="Personas">
             <span className="flex items-center gap-1.5">
               <AvatarStack people={board.members.map(onlyPerson)} size={22} max={3} />
               <IconUsers width={16} height={16} />
             </span>
           </button>
 
-          <button onClick={() => setPanel("info")} className="btn-ghost px-2" title="Actividad">
+          <button data-open-activity onClick={() => setPanel("info")} className="btn-ghost px-2" title="Actividad">
             <span className="relative">
               <IconActivity />
               {board.activity[0] && (
@@ -416,13 +412,18 @@ export function BoardView({ initial }: { initial: BoardState }) {
           </button>
 
           {isAdmin && (
-            <button onClick={() => setPanel("settings")} className="btn-ghost px-2" title="Ajustes">
+            <button data-open-settings onClick={() => setPanel("settings")} className="btn-ghost px-2" title="Ajustes">
               <IconSettings />
             </button>
           )}
 
-          <form action={logoutAction}>
-            <button className="btn-ghost px-2" title="Salir" aria-label="Salir">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              void api.signOut().then(() => router.push("/entrar"))
+            }}
+          >
+            <button data-logout className="btn-ghost px-2" title="Salir" aria-label="Salir">
               <IconLogout />
             </button>
           </form>
@@ -443,24 +444,25 @@ export function BoardView({ initial }: { initial: BoardState }) {
               <ColumnView
                 key={col.id}
                 column={col}
+                index={visibleColumns.indexOf(col)}
                 meId={board.me.userId}
                 isAdmin={isAdmin}
                 onOpenCard={setOpenCardId}
                 onCreateCard={createCard}
                 onRenameColumn={async (id, name) => {
-                  const res = await callAction(updateColumnAction(board.slug, id, { name }))
+                  const res = await callAction(api.updateColumn(board.slug, id, { name }))
                   if (res) refresh()
                 }}
                 onChangeKind={async (id, kind) => {
-                  const res = await callAction(updateColumnAction(board.slug, id, { kind }))
+                  const res = await callAction(api.updateColumn(board.slug, id, { kind }))
                   if (res) refresh()
                 }}
                 onSetWip={async (id, wip) => {
-                  const res = await callAction(updateColumnAction(board.slug, id, { wipLimit: wip }))
+                  const res = await callAction(api.updateColumn(board.slug, id, { wipLimit: wip }))
                   if (res) refresh()
                 }}
                 onDeleteColumn={async (id) => {
-                  const res = await callAction(deleteColumnAction(board.slug, id), "Columna borrada")
+                  const res = await callAction(api.deleteColumn(board.slug, id), "Columna borrada")
                   if (res) refresh()
                 }}
               />

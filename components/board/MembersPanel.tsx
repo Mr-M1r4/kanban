@@ -2,15 +2,10 @@
 
 import { useState } from "react"
 import type { BoardState } from "@/lib/types"
-import {
-  addMemberAction,
-  removeMemberAction,
-  resendInviteAction,
-  setMemberRoleAction,
-} from "@/app/actions/board"
 import { Avatar, Modal, ModalHeader, callAction, toast } from "@/components/ui"
 import { IconCheck, IconCopy, IconLink, IconPlus, IconTrash, IconUsers } from "@/components/icons"
 import { cn } from "@/lib/utils"
+import { getApi } from "@/lib/api"
 
 const copy = async (text: string, msg = "Enlace copiado") => {
   try {
@@ -30,6 +25,7 @@ export function MembersPanel({
   onChanged: () => void
   onClose: () => void
 }) {
+  const api = getApi()
   const [email, setEmail] = useState("")
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
@@ -40,7 +36,7 @@ export function MembersPanel({
     const mail = email.trim()
     if (!mail) return
     setBusy(true)
-    const res = await callAction(addMemberAction(board.slug, mail, name.trim() || undefined))
+    const res = await callAction(api.addMember(board.slug, mail, name.trim() || undefined))
     setBusy(false)
     if (res) {
       setInvite({ url: res.data.inviteUrl, who: res.data.name })
@@ -74,6 +70,7 @@ export function MembersPanel({
               <input
                 className="input"
                 type="email"
+                data-member-email
                 placeholder="correo@empresa.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -86,7 +83,12 @@ export function MembersPanel({
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && add()}
               />
-              <button className="btn-primary w-full" onClick={add} disabled={busy || !email.trim()}>
+              <button
+                data-invite-member
+                className="btn-primary w-full"
+                onClick={add}
+                disabled={busy || !email.trim()}
+              >
                 <IconPlus width={16} height={16} /> Agregar al tablero
               </button>
             </div>
@@ -96,7 +98,10 @@ export function MembersPanel({
                 <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-200">
                   <IconCheck width={13} height={13} /> {invite.who} está listo para entrar
                 </p>
-                <p className="mt-1.5 break-all rounded-md bg-black/30 px-2 py-1.5 font-mono text-[11px] text-emerald-100/90">
+                <p
+                  data-invite-link
+                  className="mt-1.5 break-all rounded-md bg-black/30 px-2 py-1.5 font-mono text-[11px] text-emerald-100/90"
+                >
                   {invite.url}
                 </p>
                 <button className="btn-outline mt-2 w-full py-1.5 text-xs" onClick={() => copy(invite.url)}>
@@ -111,9 +116,9 @@ export function MembersPanel({
           </p>
         )}
 
-        <ul className="mt-4 space-y-1.5">
+        <ul data-member-list className="mt-4 space-y-1.5">
           {board.members.map((m) => (
-            <li key={m.id} className="flex items-center gap-2.5 rounded-xl border border-board-line px-3 py-2">
+            <li key={m.id} data-member={m.email} className="flex items-center gap-2.5 rounded-xl border border-board-line px-3 py-2">
               <Avatar person={m} size={32} />
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1.5 truncate text-sm font-medium">
@@ -130,7 +135,7 @@ export function MembersPanel({
                 <button
                   className="chip bg-amber-500/15 text-amber-300"
                   onClick={async () => {
-                    const res = await callAction(resendInviteAction(board.slug, m.id))
+                    const res = await callAction(api.resendInvite(board.slug, m.id))
                     if (res) {
                       setInvite({ url: res.data.inviteUrl, who: m.name })
                       toast("Enlace nuevo generado", "ok")
@@ -146,7 +151,7 @@ export function MembersPanel({
                   value={m.role}
                   onChange={async (e) => {
                     const res = await callAction(
-                      setMemberRoleAction(board.slug, m.id, e.target.value as "member" | "admin"),
+                      api.setMemberRole(board.slug, m.id, e.target.value as "member" | "admin"),
                     )
                     if (res) {
                       toast("Permisos actualizados", "ok")
@@ -167,7 +172,7 @@ export function MembersPanel({
                   aria-label={`Quitar a ${m.name}`}
                   onClick={async () => {
                     if (!window.confirm(`¿Quitar a ${m.name} del tablero? Perderá acceso a las tareas.`)) return
-                    const res = await callAction(removeMemberAction(board.slug, m.id))
+                    const res = await callAction(api.removeMember(board.slug, m.id))
                     if (res) {
                       toast(`${m.name} quitó del tablero`, "ok")
                       onChanged()

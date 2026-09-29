@@ -1,22 +1,10 @@
 "use client"
 
-import { useFormState, useFormStatus } from "react-dom"
-import { loginAction, type FormState } from "@/app/actions/auth"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { IconArrowRight, IconLogo } from "@/components/icons"
 import { Spinner } from "@/components/ui"
-
-const initial: FormState = {}
-
-function Submit({ text }: { text: string }) {
-  const { pending } = useFormStatus()
-  return (
-    <button type="submit" className="btn-primary w-full py-2.5 text-[15px]" disabled={pending}>
-      {pending ? <Spinner /> : null}
-      {text}
-      {!pending && <IconArrowRight />}
-    </button>
-  )
-}
+import { getApi } from "@/lib/api"
 
 export function LoginScreen({
   firstRun,
@@ -27,10 +15,32 @@ export function LoginScreen({
   pinRequired: boolean
   invalidInvite: boolean
 }) {
-  const [state, formAction] = useFormState(loginAction, initial)
-  const error = invalidInvite
-    ? "Ese enlace de invitación ya no es válido. Pídele a un administrador uno nuevo."
-    : state.error
+  const api = getApi()
+  const router = useRouter()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(
+    invalidInvite ? "Ese enlace de invitación ya no es válido. Pídele a un administrador uno nuevo." : null,
+  )
+
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const form = new FormData(e.currentTarget)
+    setBusy(true)
+    setError(null)
+    const res = await api.signIn(
+      String(form.get("email") || ""),
+      String(form.get("pin") || ""),
+      String(form.get("name") || ""),
+      String(form.get("boardName") || ""),
+    )
+    setBusy(false)
+    if (!res.ok) {
+      setError(res.error)
+      return
+    }
+    router.push(`/t?b=${encodeURIComponent(res.data.slug)}`)
+    router.refresh()
+  }
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-10">
@@ -52,7 +62,7 @@ export function LoginScreen({
               : "Escribe el correo con el que te agregaron al tablero. Sin contraseñas."}
           </p>
 
-          <form action={formAction} className="mt-5 space-y-3">
+          <form onSubmit={submit} className="mt-5 space-y-3">
             {firstRun && (
               <>
                 <input name="boardName" className="input" placeholder="Nombre del tablero" maxLength={60} />
@@ -85,7 +95,11 @@ export function LoginScreen({
               </p>
             )}
 
-            <Submit text={firstRun ? "Crear tablero" : "Entrar"} />
+            <button type="submit" className="btn-primary w-full py-2.5 text-[15px]" disabled={busy}>
+              {busy ? <Spinner /> : null}
+              {firstRun ? "Crear tablero" : "Entrar"}
+              {!busy && <IconArrowRight />}
+            </button>
           </form>
         </div>
 

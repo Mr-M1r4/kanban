@@ -1,11 +1,10 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { logoutAction } from "@/app/actions/auth"
-import { createBoardWithDefaultsAction } from "@/app/actions/board"
 import { Avatar } from "@/components/ui"
 import { IconBoard, IconLogout, IconPlus } from "@/components/icons"
+import { getApi } from "@/lib/api"
 
 type Board = {
   slug: string
@@ -23,21 +22,21 @@ export function BoardsHome({
   me: { name: string; email: string; color: string }
   boards: Board[]
 }) {
+  const api = getApi()
   const router = useRouter()
   const [name, setName] = useState("")
-  const [pending, start] = useTransition()
+  const [pending, setPending] = useState(false)
 
-  const create = () => {
+  const create = async () => {
     const clean = name.trim()
     if (clean.length < 2) return
-    start(async () => {
-      const res = await createBoardWithDefaultsAction(clean)
-      if (res.ok) {
-        setName("")
-        router.push(`/t/${res.data.slug}`)
-        router.refresh()
-      }
-    })
+    setPending(true)
+    const res = await api.createBoard(clean)
+    setPending(false)
+    if (res.ok) {
+      setName("")
+      router.push(`/t?b=${encodeURIComponent(res.data.slug)}`)
+    }
   }
 
   return (
@@ -51,7 +50,12 @@ export function BoardsHome({
           <p className="truncate text-sm text-board-muted">{me.email}</p>
         </div>
         <Avatar person={me} size={34} />
-        <form action={logoutAction}>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            void api.signOut().then(() => router.push("/entrar"))
+          }}
+        >
           <button className="btn-ghost px-2" title="Salir" aria-label="Salir">
             <IconLogout />
           </button>
@@ -62,7 +66,7 @@ export function BoardsHome({
         {boards.map((b) => (
           <li key={b.slug}>
             <a
-              href={`/t/${b.slug}`}
+              href={`/t?b=${encodeURIComponent(b.slug)}`}
               className="card-surface block p-4 transition hover:border-[#38486b] hover:bg-[#1d2740]"
             >
               <div className="flex items-center gap-2">
@@ -93,11 +97,11 @@ export function BoardsHome({
           value={name}
           maxLength={60}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") create()
+                  onKeyDown={(e) => {
+            if (e.key === "Enter") void create()
           }}
         />
-        <button className="btn-primary shrink-0" onClick={create} disabled={pending || name.trim().length < 2}>
+        <button className="btn-primary shrink-0" onClick={() => void create()} disabled={pending || name.trim().length < 2}>
           <IconPlus /> Crear
         </button>
       </div>
