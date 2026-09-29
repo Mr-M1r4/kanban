@@ -98,3 +98,16 @@ generan por adelantado.
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run lint` | ESLint. |
 | `npm run check` | Los tres anteriores. |
+
+## Pruebas de contrato
+
+`Api` tiene una prueba que ejercita los 33 métodos sin pasar por la interfaz:
+
+```bash
+npm run test:contract:local      # solo el modo local (sin red)
+npm run test:contract:supabase   # necesita .env.local con la URL y la clave
+npm run test:contract            # los dos
+```
+
+La prueba de Supabase crea una cuenta y un tablero de verdad, así que deja
+datos en la base. Al terminar puedes borrarlos desde el panel de Supabase.

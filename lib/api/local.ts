@@ -457,6 +457,9 @@ export const localApi: Api = {
       if (typeof c === "string") return fail(c)
       const col = db.columns.find((x) => x.id === columnId && x.board_id === c.board.id)
       if (!col) return fail("Esa columna ya no existe.")
+      if (db.columns.filter((x) => x.board_id === c.board.id).length <= 1) {
+        return fail("El tablero necesita al menos una columna.")
+      }
       // las tareas se van a la primera columna que quede
       const first = db.columns
         .filter((x) => x.board_id === c.board.id && x.id !== columnId)

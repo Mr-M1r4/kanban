@@ -36,8 +36,21 @@ async function run<T>(fn: (me: string) => Promise<ActionResult<T>>): Promise<Act
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     if (msg.includes("Faltan NEXT_PUBLIC")) throw e
+    // El mensaje que ve la persona es generico, pero el motivo real se queda
+    // en la consola: sin esto un rechazo de RLS parece un fallo de red.
+    console.error("[kanban]", msg)
     return fail("No se pudo guardar el cambio. Revisa tu conexión.")
   }
+}
+
+/**
+ * Ejecuta una escritura y convierte el error de Supabase en una excepcion.
+ * Sin esto un rechazo de RLS pasaria por guardado correcto.
+ */
+async function write<T>(q: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return data
 }
 
 async function first<T>(q: PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T> {
@@ -77,7 +90,7 @@ async function ensureProfile(me: string, email: string, name?: string) {
     color: colorFor(clean),
     created_at: now(),
   }
-  await table("users").insert(row)
+  await write(table("users").insert(row))
   return row
 }
 
@@ -102,7 +115,7 @@ async function createBoardWithDefaults(name: string) {
   if (!board) throw new Error("No se pudo crear el tablero.")
   // El color se elige en el cliente; la funcion pone uno por defecto.
   const color = colorFor(clean)
-  await table("boards").update({ color }).eq("id", board.id)
+  await write(table("boards").update({ color }).eq("id", board.id))
   return { ...board, color }
 }
 
@@ -161,7 +174,11 @@ export const supabaseApi: Api = {
     const me = (await sb().auth.getUser()).data.user
     if (!me) return fail("Correo o PIN incorrectos.")
     const profile = await ensureProfile(me.id, clean, name)
-    const first_membership = await first<Row["members"]>(table("members").select("*").eq("user_id", me.id))
+    // Sin ordenar, Postgres devuelve cualquier membresia y se entra a un
+    // tablero distinto cada vez. La mas antigua manda.
+    const first_membership = await first<Row["members"]>(
+      table("members").select("*").eq("user_id", me.id).order("created_at", { ascending: true }),
+    )
     if (!first_membership) {
       // Si le invitaron y todavia no entro, que vaya a la invitacion en vez de
       // crear un tablero personal de propina.
@@ -230,10 +247,10 @@ export const supabaseApi: Api = {
       if (!invite) return fail("Ese enlace ya no sirve.")
       const existing = await first<Row["members"]>(table("members").select("*").eq("board_id", invite.board_id).eq("user_id", me))
       if (!existing) {
-        await table("members").insert({ id: uid(), board_id: invite.board_id, user_id: me, role: invite.role, created_at: now() })
+        await write(table("members").insert({ id: uid(), board_id: invite.board_id, user_id: me, role: invite.role, created_at: now() }))
         await log(me, invite.board_id, "member.joined", { name: "" })
       }
-      await table("invites").update({ accepted_at: now() }).eq("id", invite.id)
+      await write(table("invites").update({ accepted_at: now() }).eq("id", invite.id))
       const board = await first<Row["boards"]>(table("boards").select("*").eq("id", invite.board_id))
       const profile = await first<Row["users"]>(table("users").select("*").eq("id", me))
       return ok({ slug: board?.slug ?? "", name: profile?.name ?? invite.name })
@@ -289,7 +306,7 @@ export const supabaseApi: Api = {
       if (!ctx) return fail("Solo un administrador puede renombrar el tablero.")
       const clean = name.trim().slice(0, 80)
       if (!clean) return fail("El nombre no puede quedar vacío.")
-      await table("boards").update({ name: clean }).eq("id", ctx.board.id)
+      await write(table("boards").update({ name: clean }).eq("id", ctx.board.id))
       await log(me, ctx.board.id, "board.renamed", { to: clean })
       return ok()
     })
@@ -316,7 +333,7 @@ export const supabaseApi: Api = {
         accepted_at: null,
       }
       if (!pending) {
-        await table("invites").insert(inv)
+        await write(table("invites").insert(inv))
         await log(me, ctx.board.id, "member.invited", { to: inv.name })
       }
       return ok({ inviteUrl: inviteUrl(inv.token), name: inv.name, token: inv.token })
@@ -327,10 +344,12 @@ export const supabaseApi: Api = {
     return run(async (me) => {
       const ctx = await boardCtx(slug, me, true)
       if (!ctx) return fail("Solo un administrador puede hacer eso.")
+      const invId = memberId.replace(/^inv:/, "")
+      const before = await first<Row["invites"]>(table("invites").select("*").eq("id", invId))
+      if (!before) return fail("Esa invitacion ya no existe.")
       const fresh = token()
-      await table("invites").update({ token: fresh, accepted_at: null }).eq("id", memberId.replace(/^inv:/, ""))
-      const inv = await first<Row["invites"]>(table("invites").select("*").eq("id", memberId.replace(/^inv:/, "")))
-      return ok({ inviteUrl: inviteUrl(fresh), name: inv?.name ?? "", token: fresh })
+      await write(table("invites").update({ token: fresh, accepted_at: null }).eq("id", invId))
+      return ok({ inviteUrl: inviteUrl(fresh), name: before.name, token: fresh })
     })
   },
 
@@ -339,10 +358,15 @@ export const supabaseApi: Api = {
       const ctx = await boardCtx(slug, me, true)
       if (!ctx) return fail("Solo un administrador puede cambiar permisos.")
       if (memberId.startsWith("inv:")) {
-        await table("invites").update({ role }).eq("id", memberId.slice(4))
+        const changed = (await write(table("invites").update({ role }).eq("id", memberId.slice(4)).select("id"))) ?? []
+        if (!changed.length) return fail("Esa invitacion ya no existe.")
         return ok()
       }
-      await table("members").update({ role }).eq("id", memberId).eq("board_id", ctx.board.id)
+      const changed =
+        (await write(
+          table("members").update({ role }).eq("id", memberId).eq("board_id", ctx.board.id).select("id"),
+        )) ?? []
+      if (!changed.length) return fail("Esa persona ya no es miembro del tablero.")
       return ok()
     })
   },
@@ -352,20 +376,21 @@ export const supabaseApi: Api = {
       const ctx = await boardCtx(slug, me, true)
       if (!ctx) return fail("Solo un administrador puede quitar gente.")
       if (memberId.startsWith("inv:")) {
-        await table("invites").delete().eq("id", memberId.slice(4))
+        const gone = (await write(table("invites").delete().eq("id", memberId.slice(4)).select("id"))) ?? []
+        if (!gone.length) return fail("Esa invitacion ya no existe.")
         return ok()
       }
       if (memberId === "") return fail("No te puedes quitar a ti mismo.")
       const victim = await first<Row["members"]>(
         table("members").select("*").eq("id", memberId).eq("board_id", ctx.board.id),
       )
-      if (!victim) return ok()
+      if (!victim) return fail("Esa persona ya no es miembro del tablero.")
       if (victim.user_id === me) return fail("No te puedes quitar a ti mismo.")
-      await table("card_assignees").delete().eq("user_id", victim.user_id).in(
+      await write(table("card_assignees").delete().eq("user_id", victim.user_id).in(
         "card_id",
         (await all<{ id: string }>(table("cards").select("id").eq("board_id", ctx.board.id))).map((c) => (c as { id: string }).id),
-      )
-      await table("members").delete().eq("id", memberId)
+      ))
+      await write(table("members").delete().eq("id", memberId))
       const user = await first<Row["users"]>(table("users").select("*").eq("id", victim.user_id))
       await log(me, ctx.board.id, "member.removed", { to: user?.name ?? "" })
       return ok()
@@ -384,14 +409,14 @@ export const supabaseApi: Api = {
           (c) => c.position,
         ),
       )
-      await table("columns").insert({
+      await write(table("columns").insert({
         id: uid(),
         board_id: ctx.board.id,
         title: clean,
         kind: kindOf(kind),
         position: last + 1024,
         wip_limit: null,
-      })
+      }))
       await log(me, ctx.board.id, "column.created", { name: clean })
       return ok()
     })
@@ -418,7 +443,7 @@ export const supabaseApi: Api = {
     return run(async (me) => {
       const ctx = await boardCtx(slug, me)
       if (!ctx) return fail("No perteneces a este tablero.")
-      await table("columns").update({ position }).eq("id", columnId).eq("board_id", ctx.board.id)
+      await write(table("columns").update({ position }).eq("id", columnId).eq("board_id", ctx.board.id))
       await rebalance("columns", ctx.board.id)
       return ok()
     })
@@ -432,16 +457,18 @@ export const supabaseApi: Api = {
         table("columns").select("*").eq("id", columnId).eq("board_id", ctx.board.id),
       )
       if (!col) return fail("Esa columna ya no existe.")
+      const total = await all<{ id: string }>(table("columns").select("id").eq("board_id", ctx.board.id))
+      if (total.length <= 1) return fail("El tablero necesita al menos una columna.")
       const cards = (await all<{ id: string }>(table("cards").select("id").eq("column_id", columnId))) as { id: string }[]
       if (cards.length) {
         const ids = cards.map((c) => c.id)
-        await table("card_labels").delete().in("card_id", ids)
-        await table("card_assignees").delete().in("card_id", ids)
-        await table("items").delete().in("card_id", ids)
-        await table("comments").delete().in("card_id", ids)
-        await table("cards").delete().in("id", ids)
+        await write(table("card_labels").delete().in("card_id", ids))
+        await write(table("card_assignees").delete().in("card_id", ids))
+        await write(table("items").delete().in("card_id", ids))
+        await write(table("comments").delete().in("card_id", ids))
+        await write(table("cards").delete().in("id", ids))
       }
-      await table("columns").delete().eq("id", columnId)
+      await write(table("columns").delete().eq("id", columnId))
       await log(me, ctx.board.id, "column.deleted", { name: col.title })
       return ok()
     })
@@ -456,7 +483,7 @@ export const supabaseApi: Api = {
       const dupe = await first(table("labels").select("id").eq("board_id", ctx.board.id).ilike("name", clean)
       )
       if (dupe) return fail("Ya existe una etiqueta con ese nombre.")
-      await table("labels").insert({ id: uid(), board_id: ctx.board.id, name: clean, color })
+      await write(table("labels").insert({ id: uid(), board_id: ctx.board.id, name: clean, color }))
       return ok()
     })
   },
@@ -477,8 +504,8 @@ export const supabaseApi: Api = {
     return run(async (me) => {
       const ctx = await boardCtx(slug, me, true)
       if (!ctx) return fail("Solo un administrador puede borrar etiquetas.")
-      await table("card_labels").delete().eq("label_id", labelId)
-      await table("labels").delete().eq("id", labelId)
+      await write(table("card_labels").delete().eq("label_id", labelId))
+      await write(table("labels").delete().eq("id", labelId))
       return ok()
     })
   },
@@ -513,7 +540,7 @@ export const supabaseApi: Api = {
         created_at: now(),
         updated_at: now(),
       }
-      await table("cards").insert(card)
+      await write(table("cards").insert(card))
       await log(me, ctx.board.id, "card.created", { title: clean }, card.id)
       return ok({ id: card.id })
     })
@@ -536,7 +563,7 @@ export const supabaseApi: Api = {
       if (patch.dueAt !== undefined) data.due_at = patch.dueAt || null
       if (!Object.keys(data).length) return ok()
       data.updated_at = now()
-      await table("cards").update(data).eq("id", cardId)
+      await write(table("cards").update(data).eq("id", cardId))
       if (data.title) await log(me, ctx.board.id, "card.renamed", { title: data.title }, cardId)
       return ok()
     })
@@ -574,11 +601,11 @@ export const supabaseApi: Api = {
       if (!ctx) return fail("No perteneces a este tablero.")
       const card = await first<Row["cards"]>(table("cards").select("*").eq("id", cardId).eq("board_id", ctx.board.id))
       if (!card) return ok()
-      await table("card_labels").delete().eq("card_id", cardId)
-      await table("card_assignees").delete().eq("card_id", cardId)
-      await table("items").delete().eq("card_id", cardId)
-      await table("comments").delete().eq("card_id", cardId)
-      await table("cards").delete().eq("id", cardId)
+      await write(table("card_labels").delete().eq("card_id", cardId))
+      await write(table("card_assignees").delete().eq("card_id", cardId))
+      await write(table("items").delete().eq("card_id", cardId))
+      await write(table("comments").delete().eq("card_id", cardId))
+      await write(table("cards").delete().eq("id", cardId))
       await log(me, ctx.board.id, "card.deleted", { title: card.title })
       return ok()
     })
@@ -606,7 +633,7 @@ export const supabaseApi: Api = {
         created_at: now(),
         updated_at: now(),
       }
-      await table("cards").insert(copy)
+      await write(table("cards").insert(copy))
       const [assignees, labels, items] = await Promise.all([
         all<Row["card_assignees"]>(table("card_assignees").select("*").eq("card_id", src.id)),
         all<Row["card_labels"]>(table("card_labels").select("*").eq("card_id", src.id)),
@@ -616,7 +643,7 @@ export const supabaseApi: Api = {
       if (labels.length) await table("card_labels").insert(labels.map((l) => ({ card_id: copy.id, label_id: l.label_id })))
       const ordered = [...items].sort((a, b) => a.position - b.position)
       if (ordered.length)
-        await table("items").insert(
+        await write(table("items").insert(
           ordered.map((it, i) => ({
             id: uid(),
             card_id: copy.id,
@@ -626,7 +653,7 @@ export const supabaseApi: Api = {
             due_at: it.due_at,
             assignee_id: it.assignee_id,
           })),
-        )
+        ))
       return ok({ id: copy.id })
     })
   },
@@ -642,12 +669,12 @@ export const supabaseApi: Api = {
         if (!member) return fail("Esa persona no está en el tablero.")
         const has = await first<{ card_id: string }>(table("card_assignees").select("*").eq("card_id", cardId).eq("user_id", userId))
         if (!has) {
-          await table("card_assignees").insert({ card_id: cardId, user_id: userId })
+          await write(table("card_assignees").insert({ card_id: cardId, user_id: userId }))
           const user = await first<Row["users"]>(table("users").select("*").eq("id", userId))
           await log(me, ctx.board.id, "card.assigned", { title: card.title, to: user?.name ?? "" }, cardId)
         }
       } else {
-        await table("card_assignees").delete().eq("card_id", cardId).eq("user_id", userId)
+        await write(table("card_assignees").delete().eq("card_id", cardId).eq("user_id", userId))
       }
       return ok()
     })
@@ -665,7 +692,7 @@ export const supabaseApi: Api = {
         const has = await first<{ card_id: string }>(table("card_labels").select("*").eq("card_id", cardId).eq("label_id", labelId))
         if (!has) await table("card_labels").insert({ card_id: cardId, label_id: labelId })
       } else {
-        await table("card_labels").delete().eq("card_id", cardId).eq("label_id", labelId)
+        await write(table("card_labels").delete().eq("card_id", cardId).eq("label_id", labelId))
       }
       return ok()
     })
@@ -685,7 +712,7 @@ export const supabaseApi: Api = {
           (i) => i.position,
         ),
       )
-      await table("items").insert({
+      await write(table("items").insert({
         id: uid(),
         card_id: cardId,
         title: clean,
@@ -693,7 +720,7 @@ export const supabaseApi: Api = {
         position: last + 1024,
         due_at: dueAt || null,
         assignee_id: assigneeId || null,
-      })
+      }))
       return ok()
     })
   },
@@ -718,7 +745,7 @@ export const supabaseApi: Api = {
     return run(async (me) => {
       const ctx = await boardCtx(slug, me)
       if (!ctx) return fail("No perteneces a este tablero.")
-      await table("items").delete().eq("id", itemId).eq("card_id", cardId)
+      await write(table("items").delete().eq("id", itemId).eq("card_id", cardId))
       return ok()
     })
   },
@@ -731,7 +758,7 @@ export const supabaseApi: Api = {
       if (!card) return fail("Esa tarea ya no existe.")
       const clean = body.trim().slice(0, 2000)
       if (!clean) return fail("Escribe algo primero.")
-      await table("comments").insert({ id: uid(), card_id: cardId, author_id: me, body: clean, created_at: now() })
+      await write(table("comments").insert({ id: uid(), card_id: cardId, author_id: me, body: clean, created_at: now() }))
       await log(me, ctx.board.id, "card.commented", { title: card.title }, cardId)
       return ok()
     })
@@ -746,7 +773,7 @@ export const supabaseApi: Api = {
       )
       if (!comment) return ok()
       if (comment.author_id !== me) return fail("Solo puedes borrar tus comentarios.")
-      await table("comments").delete().eq("id", commentId)
+      await write(table("comments").delete().eq("id", commentId))
       return ok()
     })
   },

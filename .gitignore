@@ -1,24 +1,6 @@
 node_modules
 .next
 out
-build
-.DS_Store
-*.pem
-npm-debug.log*
-.env
-.env*.local
+.env.local
+*.tsbuildinfo
 next-env.d.ts
-tsconfig.tsbuildinfo
-
-# Dependencias
-node_modules
-.next
-out
-
-# Entorno
-.env
-.env*.local
-
-# Sistema
-.DS_Store
-*.log
