@@ -117,6 +117,20 @@ function uniqueSlug(db: Db, base: string) {
   return slug
 }
 
+function userEmailOf(db: Db, userId: string): string {
+  return db.users.find((u) => u.id === userId)?.email ?? ""
+}
+
+/** Acepta una invitacion en el almacenamiento local. */
+function joinBoard(db: Db, invite: Row["invites"], userId: string) {
+  if (!db.members.some((m) => m.board_id === invite.board_id && m.user_id === userId)) {
+    db.members.push({ id: uid(), board_id: invite.board_id, user_id: userId, role: invite.role, created_at: now() })
+    const user = db.users.find((u) => u.id === userId)
+    log(db, invite.board_id, userId, "member.joined", { name: user?.name ?? "" })
+  }
+  invite.accepted_at = now()
+}
+
 function createBoardWithDefaults(db: Db, name: string, userId: string): Row["boards"] {
   const clean = name.trim().slice(0, 80) || "Mi Tablero"
   const board: Row["boards"] = {
@@ -227,10 +241,13 @@ export const localApi: Api = {
       setSession(user.id)
       const first = db.members.find((m) => m.user_id === user.id)
       if (!first) {
-        // Si le invitaron y todavia no entro, que vaya a la invitacion en vez
-        // de crear un tablero personal de propina.
-        const invite = db.invites.find((i) => i.email === clean && !i.accepted_at)
-        if (invite) return ok({ slug: "", name: user.name, inviteToken: invite.token })
+        // Si le invitaron a varios tableros, entra a todos de una vez.
+        const invites = db.invites.filter((i) => i.email === clean && !i.accepted_at)
+        if (invites.length) {
+          for (const inv of invites) joinBoard(db, inv, user.id)
+          const target = db.boards.find((b) => b.id === invites[0].board_id)
+          if (target) return ok({ slug: target.slug, name: user.name })
+        }
         const board = createBoardWithDefaults(db, boardName.trim() || "Mi Tablero", user.id)
         return ok({ slug: board.slug, name: user.name })
       }
@@ -246,7 +263,24 @@ export const localApi: Api = {
   async listBoards(): Promise<BoardSummary[]> {
     const db = read()
     const me = sessionUserId()
-    return db.members
+    const pending: BoardSummary[] = db.invites
+      .filter((i) => i.email === normalizeEmail(userEmailOf(db, me)) && !i.accepted_at)
+      .filter((i) => !db.members.some((m) => m.board_id === i.board_id && m.user_id === me))
+      .map((i) => {
+        const board = db.boards.find((b) => b.id === i.board_id)
+        return {
+          id: board!.id,
+          name: board!.name,
+          slug: board!.slug,
+          color: board!.color,
+          role: i.role,
+          memberCount: db.members.filter((m) => m.board_id === i.board_id).length,
+          cardCount: db.cards.filter((c) => c.board_id === i.board_id).length,
+          pending: true,
+          inviteToken: i.token,
+        }
+      })
+    const mine = db.members
       .filter((m) => m.user_id === me)
       .map((m) => {
         const board = db.boards.find((b) => b.id === m.board_id)!
@@ -261,6 +295,7 @@ export const localApi: Api = {
         }
       })
       .filter((b) => !!b.slug)
+    return [...pending, ...mine]
   },
 
   async createBoard(name: string): Promise<ActionResult<SignInResult>> {
@@ -289,17 +324,7 @@ export const localApi: Api = {
       if (!me) return fail("Entra con tu correo para aceptar la invitación.")
       const board = db.boards.find((b) => b.id === invite.board_id)
       if (!board) return fail("Ese tablero ya no existe.")
-      if (!db.members.some((m) => m.board_id === board.id && m.user_id === me.id)) {
-        db.members.push({
-          id: uid(),
-          board_id: board.id,
-          user_id: me.id,
-          role: invite.role,
-          created_at: now(),
-        })
-        log(db, board.id, me.id, "member.joined", { name: me.name })
-      }
-      invite.accepted_at = now()
+      joinBoard(db, invite, me.id)
       return ok({ slug: board.slug, name: me.name })
     })
   },

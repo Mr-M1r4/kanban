@@ -43,6 +43,21 @@ async function run<T>(fn: (me: string) => Promise<ActionResult<T>>): Promise<Act
   }
 }
 
+/** Acepta una invitacion: crea la membresia si falta y marca la invitacion. */
+async function joinBoard(me: string, invite: Row["invites"]) {
+  const existing = await first<Row["members"]>(
+    table("members").select("*").eq("board_id", invite.board_id).eq("user_id", me),
+  )
+  if (!existing) {
+    await write(
+      table("members").insert({ id: uid(), board_id: invite.board_id, user_id: me, role: invite.role, created_at: now() }),
+    )
+    await log(me, invite.board_id, "member.joined", { name: "" })
+  }
+  await write(table("invites").update({ accepted_at: now() }).eq("id", invite.id))
+  return first<Row["users"]>(table("users").select("*").eq("id", me))
+}
+
 /**
  * Ejecuta una escritura y convierte el error de Supabase en una excepcion.
  * Sin esto un rechazo de RLS pasaria por guardado correcto.
@@ -180,12 +195,16 @@ export const supabaseApi: Api = {
       table("members").select("*").eq("user_id", me.id).order("created_at", { ascending: true }),
     )
     if (!first_membership) {
-      // Si le invitaron y todavia no entro, que vaya a la invitacion en vez de
-      // crear un tablero personal de propina.
-      const invite = await first<Row["invites"]>(
-        table("invites").select("*").eq("email", clean).is("accepted_at", null),
+      // Si le invitaron, entra a todos esos tableros de golpe. Antes tocaba
+      // aceptar uno por uno y el resto se quedaba colgando para siempre.
+      const invites = await all<Row["invites"]>(
+        table("invites").select("*").eq("email", clean).is("accepted_at", null).order("created_at", { ascending: true }),
       )
-      if (invite) return ok({ slug: "", name: profile.name, inviteToken: invite.token })
+      if (invites.length) {
+        for (const inv of invites) await joinBoard(me.id, inv)
+        const board = await first<Row["boards"]>(table("boards").select("*").eq("id", invites[0].board_id))
+        return ok({ slug: board?.slug ?? "", name: profile.name })
+      }
       const board = await createBoardWithDefaults(boardName.trim() || "Mi Tablero")
       return ok({ slug: board.slug, name: profile.name })
     }
@@ -201,11 +220,33 @@ export const supabaseApi: Api = {
     const { data } = await sb().auth.getUser()
     if (!data.user) return []
     const memberships = await all<Row["members"]>(table("members").select("*").eq("user_id", data.user.id))
+    const openInvites = data.user.email
+      ? await all<Row["invites"]>(
+          table("invites").select("*").eq("email", normalizeEmail(data.user.email)).is("accepted_at", null),
+        )
+      : []
     const list = memberships
     const out: BoardSummary[] = []
+    // Las invitaciones sin aceptar salen en la lista para poder entrar a ellas.
+    for (const inv of openInvites) {
+      if (memberships.some((m) => m.board_id === inv.board_id)) continue
+      const board = await first<Row["boards"]>(table("boards").select("*").eq("id", inv.board_id))
+      if (!board?.slug) continue
+      out.push({
+        id: board.id,
+        name: board.name,
+        slug: board.slug,
+        color: board.color,
+        role: inv.role,
+        memberCount: 0,
+        cardCount: 0,
+        pending: true,
+        inviteToken: inv.token,
+      })
+    }
     for (const m of list) {
       const board = await first<Row["boards"]>(table("boards").select("*").eq("id", m.board_id))
-      if (!board) continue
+      if (!board?.slug) continue
       const [members, cards] = await Promise.all([
         all<{ id: string }>(table("members").select("id").eq("board_id", board.id)),
         all<{ id: string }>(table("cards").select("id").eq("board_id", board.id)),
@@ -245,14 +286,8 @@ export const supabaseApi: Api = {
     return run(async (me) => {
       const invite = await first<Row["invites"]>(table("invites").select("*").eq("token", t).is("accepted_at", null))
       if (!invite) return fail("Ese enlace ya no sirve.")
-      const existing = await first<Row["members"]>(table("members").select("*").eq("board_id", invite.board_id).eq("user_id", me))
-      if (!existing) {
-        await write(table("members").insert({ id: uid(), board_id: invite.board_id, user_id: me, role: invite.role, created_at: now() }))
-        await log(me, invite.board_id, "member.joined", { name: "" })
-      }
-      await write(table("invites").update({ accepted_at: now() }).eq("id", invite.id))
+      const profile = await joinBoard(me, invite)
       const board = await first<Row["boards"]>(table("boards").select("*").eq("id", invite.board_id))
-      const profile = await first<Row["users"]>(table("users").select("*").eq("id", me))
       return ok({ slug: board?.slug ?? "", name: profile?.name ?? invite.name })
     })
   },

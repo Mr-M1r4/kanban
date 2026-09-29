@@ -117,6 +117,10 @@ export type BoardSummary = {
   role: Role
   memberCount: number
   cardCount: number
+  /** Invitación sin aceptar: todavía no se puede abrir el tablero. */
+  pending?: boolean
+  /** Token para aceptar la invitación desde "Tus tableros". */
+  inviteToken?: string
 }
 
 export type InviteResult = { inviteUrl: string; name: string; token: string }

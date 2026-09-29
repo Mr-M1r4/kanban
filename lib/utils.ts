@@ -76,6 +76,14 @@ export function priorityOf(key: string) {
   return PRIORITIES[(key as PriorityKey) in PRIORITIES ? (key as PriorityKey) : "normal"]
 }
 
+/** Prefijo de despliegue ("/kanban" en GitHub Pages, "" en local). */
+export const basePath = process.env.NEXT_PUBLIC_BASE_PATH || ""
+
+export const homePath = () => `${basePath}/`
+export const boardPath = (slug: string) => `${basePath}/t/?b=${encodeURIComponent(slug)}`
+export const invitePath = (token: string) => `${basePath}/invitar/?token=${encodeURIComponent(token)}`
+export const loginPath = () => `${basePath}/entrar/`
+
 export function kindOf(key: string): ColumnKind {
   return (COLUMN_KIND_KEYS as string[]).includes(key) ? (key as ColumnKind) : "todo"
 }

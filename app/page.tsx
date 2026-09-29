@@ -50,7 +50,8 @@ export default function HomePage() {
         role: b.role,
         cards: b.cardCount,
         people: b.memberCount,
-        pending: false,
+        pending: !!b.pending,
+        inviteToken: b.inviteToken,
       }))}
     />
   )

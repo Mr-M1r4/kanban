@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { IconArrowRight, IconLogo } from "@/components/icons"
 import { Spinner } from "@/components/ui"
 import { getApi } from "@/lib/api"
+import { boardPath, invitePath } from "@/lib/utils"
 
 export function LoginScreen({
   firstRun,
@@ -40,10 +41,10 @@ export function LoginScreen({
     }
     // Le invitaron y aun no es miembro: a la pagina de la invitacion.
     if (res.data.inviteToken) {
-      router.push(`/invitar?token=${encodeURIComponent(res.data.inviteToken)}`)
+      router.push(invitePath(res.data.inviteToken))
       return
     }
-    router.push(`/t?b=${encodeURIComponent(res.data.slug)}`)
+    router.push(boardPath(res.data.slug))
     router.refresh()
   }
 

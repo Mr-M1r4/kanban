@@ -6,6 +6,7 @@ import Link from "next/link"
 import { IconArrowRight, IconLogo } from "@/components/icons"
 import { Avatar, Spinner } from "@/components/ui"
 import { getApi } from "@/lib/api"
+import { boardPath } from "@/lib/utils"
 import type { InviteInfo } from "@/lib/api/types"
 
 export default function InvitePage() {
@@ -89,7 +90,7 @@ function Invite() {
       setError(res.error)
       return
     }
-    router.push(`/t?b=${encodeURIComponent(res.data.slug)}`)
+    router.push(boardPath(res.data.slug))
   }
 
   return (

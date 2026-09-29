@@ -275,15 +275,10 @@ check("la invitación está pendiente", inviteBefore?.pending === true, inviteBe
 
 await api.signOut()
 const bruno = ok(await api.signIn(guestEmail, api.needsPin ? PIN : "", "Bruno"), "Bruno entra con su PIN")
-check("al entrar le avisan de la invitación", !!bruno.inviteToken, bruno.slug)
-check("no le crean un tablero propio", bruno.inviteToken !== undefined)
-
-check("el token que trae el alta es el de la invitación", guest.token === bruno.inviteToken, {
-  addMember: guest.token,
-  signIn: bruno.inviteToken,
-})
-check("el invitado ve la invitación pendiente", (await api.getInvite(guest.token))?.pending === true)
-ok(await api.acceptInvite(guest.token), "acceptInvite")
+check("entra directo, sin paso previo por el enlace", !!bruno.slug && bruno.inviteToken === undefined, bruno.slug)
+const brunoList = await api.listBoards()
+check("no le crean un tablero propio de propina", brunoList.length === 1, brunoList.map((b) => b.name))
+check("la invitación queda aceptada", (await api.getInvite(guest.token))?.pending === false)
 const bState = await api.getBoardState(slug)
 check("Bruno ve el tablero", !!bState && bState.columns.length >= 1)
 check("Bruno es miembro normal", bState?.me.role === "member", bState?.me.role)
@@ -292,9 +287,6 @@ ok(await api.createCard(slug, bState!.columns[0].id, "Tarjeta de Bruno"), "Bruno
 await expectReject("Bruno no puede crear columnas", api.createColumn(slug, "Intrusa", "todo"))
 await expectReject("Bruno no puede invitar", api.addMember(slug, `loto-${uniq()}@example.com`))
 check("Bruno no puede entrar en otro tablero", (await api.getBoardState("tablero-ajeno")) === null)
-
-const afterInvite = await api.getInvite(guest.token)
-check("la invitación queda aceptada", afterInvite?.pending === false, afterInvite)
 
 // --------------------------------------------------------------- salida ----
 step("vuelta de la administradora y baja de la persona")
@@ -320,6 +312,39 @@ ok(await api.removeMember(slug, brunoRow!.id), "removeMember")
 const stFin = (await api.getBoardState(slug))!
 check("la persona ya no es miembro", !stFin.members.some((m) => m.id === brunoRow!.id))
 check("sus tarjetas siguen en el tablero", stFin.columns.some((c) => c.cards.some((c2) => c2.title === "Tarjeta de Bruno")))
+
+// ------------------------------------------------- varias invitaciones ----
+step("invitaciones a varios tableros a la vez")
+
+const multi = `multi-${uniq()}@example.com`
+const b1 = ok(await api.createBoard("Tablero A"), "createBoard A").slug
+const b2 = ok(await api.createBoard("Tablero B"), "createBoard B").slug
+ok(await api.addMember(b1, multi, "Multi"), "invitar al tablero A")
+ok(await api.addMember(b2, multi, "Multi"), "invitar al tablero B")
+
+await api.signOut()
+const multiSign = ok(await api.signIn(multi, api.needsPin ? PIN : "", "Multi"), "la persona entra una sola vez")
+const multiBoards = await api.listBoards()
+check("entra a los dos tableros de golpe", multiBoards.length === 2, multiBoards.map((b) => b.name))
+check("ninguno queda como invitación pendiente", multiBoards.every((b) => !b.pending))
+check("ve el contenido de los dos", !!(await api.getBoardState(b1)) && !!(await api.getBoardState(b2)))
+
+step("invitación que llega con la cuenta ya creada")
+const late = `late-${uniq()}@example.com`
+ok(await api.signIn(late, api.needsPin ? PIN : "", "Tarde"), "la persona ya tiene cuenta propia")
+await api.signOut()
+const ownerBack = ok(await api.signIn(email, api.needsPin ? PIN : "", "Probe"), "vuelve la administradora")
+ok(await api.addMember(b1, late, "Tarde"), "se le invita después")
+await api.signOut()
+ok(await api.signIn(late, api.needsPin ? PIN : "", "Tarde"), "reabre su cuenta")
+const lateList = await api.listBoards()
+check("ve su tablero y el nuevo como pendiente", lateList.length === 2, lateList.map((b) => b.name))
+const latePending = lateList.find((b) => b.pending)
+check("el pendiente trae token para entrar", !!latePending?.inviteToken)
+check("no puede abrir el pendiente todavía", (await api.getBoardState(latePending!.slug)) === null)
+ok(await api.acceptInvite(latePending!.inviteToken!), "acepta desde su lista")
+check("ya entra al tablero invitado", !!(await api.getBoardState(latePending!.slug)))
+ok(await api.signIn(email, api.needsPin ? PIN : "", "Probe"), "la administradora vuelve")
 
 step("salida de sesión")
 await api.signOut()
