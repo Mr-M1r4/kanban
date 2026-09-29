@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-board-bg text-board-text antialiased;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    "Noto Sans", sans-serif;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3550 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #2a3550;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #3a4a70;
+  background-clip: content-box;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-board-accent text-white hover:bg-[#4a7cf0] active:bg-[#3f6fe0];
+  }
+  .btn-ghost {
+    @apply btn text-board-muted hover:bg-white/5 hover:text-board-text;
+  }
+  .btn-outline {
+    @apply btn border border-board-line bg-white/[0.03] text-board-text hover:border-[#38486b] hover:bg-white/[0.06];
+  }
+  .btn-danger {
+    @apply btn bg-red-500/10 text-red-300 hover:bg-red-500/20;
+  }
+  .input {
+    @apply w-full rounded-lg border border-board-line bg-[#0e1526] px-3 py-2 text-sm text-board-text
+      placeholder:text-board-muted/70 focus:border-board-accent focus:outline-none focus:ring-2
+      focus:ring-board-accent/25;
+  }
+  .card-surface {
+    @apply rounded-xl border border-board-line bg-board-panel2 shadow-card;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium;
+  }
+  .link {
+    @apply text-board-accent underline-offset-2 hover:underline;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.18s ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
