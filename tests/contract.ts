@@ -346,6 +346,18 @@ ok(await api.acceptInvite(latePending!.inviteToken!), "acepta desde su lista")
 check("ya entra al tablero invitado", !!(await api.getBoardState(latePending!.slug)))
 ok(await api.signIn(email, api.needsPin ? PIN : "", "Probe"), "la administradora vuelve")
 
+step("reinvitación a alguien que ya es miembro")
+const re = `re-${uniq()}@example.com`
+const rb = ok(await api.createBoard("Tablero de la reinvitación"), "createBoard R").slug
+ok(await api.addMember(rb, re, "Re"), "primera invitación")
+ok(await api.signIn(re, api.needsPin ? PIN : "", "Re"), "entra y se une solo")
+check("ya es miembro, sin tablero propio", (await api.listBoards()).length === 1)
+ok(await api.signIn(email, api.needsPin ? PIN : "", "Probe"), "vuelve la dueña")
+const reAgain = await api.addMember(rb, re, "Re")
+check("reinvitar a un miembro avisa en vez de crear invitación muerta", !reAgain.ok, reAgain)
+check("el aviso es claro", /ya está en este tablero/.test(reAgain.ok ? "" : reAgain.error), reAgain.ok ? "" : reAgain.error)
+check("no queda ninguna invitación colgada", !(await api.listBoards()).some((b) => b.pending))
+
 step("salida de sesión")
 await api.signOut()
 check("tras signOut no hay sesión", (await api.getSession()) === null)

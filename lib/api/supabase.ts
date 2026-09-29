@@ -353,6 +353,15 @@ export const supabaseApi: Api = {
       if (!ctx) return fail("Solo un administrador puede agregar gente.")
       const clean = normalizeEmail(email)
       if (!clean.includes("@")) return fail("Escribe un correo válido.")
+      // Si ya esta en el tablero, invitarlo creaba una invitacion muerta que
+      // nadie podia aceptar. Mejor decirlo claro.
+      const person = await first<Row["users"]>(table("users").select("*").eq("email", clean))
+      if (person) {
+        const already = await first<Row["members"]>(
+          table("members").select("*").eq("board_id", ctx.board.id).eq("user_id", person.id),
+        )
+        if (already) return fail(`${person.name || clean} ya está en este tablero.`)
+      }
       const pending = await first<Row["invites"]>(
         table("invites").select("*").eq("board_id", ctx.board.id).eq("email", clean).is("accepted_at", null),
       )

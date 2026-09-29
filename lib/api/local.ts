@@ -356,8 +356,9 @@ export const localApi: Api = {
       if (typeof c === "string") return fail(c)
       const clean = normalizeEmail(email)
       if (!clean.includes("@")) return fail("Escribe un correo válido.")
-      if (db.members.some((m) => m.board_id === c.board.id && m.user_id === db.users.find((u) => u.email === clean)?.id))
-        return fail(`${clean} ya está en el tablero.`)
+      const person = db.users.find((u) => u.email === clean)
+      if (person && db.members.some((m) => m.board_id === c.board.id && m.user_id === person.id))
+        return fail(`${person.name || clean} ya está en este tablero.`)
       const pending = db.invites.find((i) => i.board_id === c.board.id && i.email === clean && !i.accepted_at)
       const who = findOrCreateUser(db, clean, name)
       const inv = pending ?? {
