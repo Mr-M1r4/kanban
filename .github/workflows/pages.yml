@@ -28,15 +28,13 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Variables de la build
+      - name: Build estático
+        run: npm run build
         env:
           NEXT_PUBLIC_BACKEND: ${{ vars.NEXT_PUBLIC_BACKEND || 'local' }}
           NEXT_PUBLIC_BASE_PATH: ${{ vars.NEXT_PUBLIC_BASE_PATH || '/kanban' }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-
-      - name: Build estático
-        run: npm run build
 
       - name: Configurar Pages
         uses: actions/configure-pages@v5
